@@ -53,7 +53,9 @@
       "garlic",
       "ginger",
       "broccoli",
-      "tomatoes",
+      "tomatoes"
     ]
   }
 }
+
+//NEED TO TEST WITH SMALL NUMBER OF TOKENS TO CAPTURE ERROR

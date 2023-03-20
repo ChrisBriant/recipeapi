@@ -29,6 +29,9 @@ if os.path.isfile(dotenv_file):
 #Load the open AI key
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+#Token limit
+TOKEN_LIMIT = 800
+
 #Models
 
 class Card(BaseModel):
@@ -52,6 +55,7 @@ class RecipeResponse(BaseModel):
     ingredients: Dict[int, str]
     instructions: Dict[int, str]
     extra_ingredients: Dict[int, str]
+    completion_tokens : int
 
 class Ingredients(BaseModel):
     ingredient_list : List[str]
@@ -91,6 +95,15 @@ def get_cards_and_reading():
         'message' : reading
     }
 
+#For handling errors where the token limit is not enough
+class TokenLimitException(Exception):
+    pass
+
+#For handling errors when parsing the AI output
+class ResponseParseException(Exception):
+    pass
+
+
 def get_enumerated_items_as_object(items_str):
        # use a regular expression to split the string based on the enumeration pattern
     items = re.findall(r"(\d+)\.\s*(\S.*?)\s*(?=\d+\.|$)", items_str)
@@ -117,7 +130,7 @@ def get_recipe_from_ai(ingredients):
             model="text-davinci-002",
             prompt=prompt_posibility,
             temperature=0.6,
-            max_tokens=400,
+            max_tokens=600,
         )
     except Exception as e:
         print(e)
@@ -135,6 +148,7 @@ def get_recipe_from_ai(ingredients):
             'ingredients' : {},
             'instructions' : {},
             'extra_ingredients' : {},
+            'completion_tokens' : 0,
         }
         return response_obj
     #Get the recipe
@@ -151,34 +165,42 @@ def get_recipe_from_ai(ingredients):
             model="text-davinci-002",
             prompt=prompt_recipe,
             temperature=0.6,
-            max_tokens=800,
+            max_tokens=TOKEN_LIMIT,
         )
+        #print(response['usage']['completion_tokens'])
+        print('Total tokens',response['usage']['total_tokens'])
+        print('Token limit',TOKEN_LIMIT)
     except Exception as e:
         print(e)
         response = None
+    if response['usage']['total_tokens'] > TOKEN_LIMIT:
+        raise TokenLimitException('Not enough tokens to complete the request.')
     print('Here is a the response',response)
-    response_str = response['choices'][0]['text']
-    
-    # Extract title
-    title_match = re.search(r"Title:\s*(.*)", response_str)
-    title = title_match.group(1)
+    try:
+        response_str = response['choices'][0]['text']
+        
+        # Extract title
+        title_match = re.search(r"Title:\s*(.*)", response_str)
+        title = title_match.group(1)
 
-    # Extract ingredients
-    ingredients_match = re.search(r"Ingredients:\s*(.*)Instructions:", response_str, re.DOTALL)
-    ingredients = ingredients_match.group(1)
+        # Extract ingredients
+        ingredients_match = re.search(r"Ingredients:\s*(.*)Instructions:", response_str, re.DOTALL)
+        ingredients = ingredients_match.group(1)
 
-    # Extract instructions
-    instructions_match = re.search(r"Instructions:\s*(.*)Extra Ingredients:", response_str, re.DOTALL)
-    instructions = instructions_match.group(1)
+        # Extract instructions
+        instructions_match = re.search(r"Instructions:\s*(.*)Extra Ingredients:", response_str, re.DOTALL)
+        instructions = instructions_match.group(1)
 
-    # Extract description
-    description_match = re.search(r"Description:\s*(.*)", response_str, re.DOTALL)
-    description = description_match.group(1)
+        # Extract description
+        description_match = re.search(r"Description:\s*(.*)", response_str, re.DOTALL)
+        description = description_match.group(1)
 
 
-    # Extract extra ingredients
-    extra_match = re.search(r"Extra Ingredients:\s*(.*)", response_str, re.DOTALL)
-    extra = extra_match.group(1)
+        # Extract extra ingredients
+        extra_match = re.search(r"Extra Ingredients:\s*(.*)", response_str, re.DOTALL)
+        extra = extra_match.group(1)
+    except Exception:
+        raise ResponseParseException('Unable to process the AI output')
 
     # print("Title:", title)
     # print("Ingredients:", ingredients)
@@ -199,7 +221,8 @@ def get_recipe_from_ai(ingredients):
         'ingredients' : ingredient_dict,
         'instructions' : instruction_dict,
         'extra_ingredients' : extra_ingredient_dict,
-    }
+        'completion_tokens' : response['usage']['total_tokens'] 
+     }
     return response_obj
 
 
@@ -208,6 +231,11 @@ def get_recipe(key: Key, ingredients:Ingredients):
     auth_key = os.getenv("AUTH_KEY")
     if not key.key == auth_key:
         raise HTTPException(status_code=403, detail="Unauthorised")
-    recipe = get_recipe_from_ai(ingredients.ingredient_list)
+    try:
+        recipe = get_recipe_from_ai(ingredients.ingredient_list)
+    except TokenLimitException:
+        raise HTTPException(status_code=400, detail="Token limit exceeded")
+    except ResponseParseException:
+        raise HTTPException(status_code=400, detail="Unable to prcess the reponse received")
     #recipe = {'possible' : False}
     return recipe
