@@ -47,6 +47,7 @@ class Key(BaseModel):
 
 class RecipeResponse(BaseModel):
     possible: bool
+    reason : str
     title: str
     description: str
     ingredients: Dict[int, str]
@@ -74,7 +75,6 @@ def get_enumerated_items_as_object(items_str):
     for item in items:
         # item is a tuple containing the number and ingredient
         number = int(item[0])
-        #ingredient = item[1]
         # add the ingredient to the dictionary with the number as the key
         enumerated_items_dict[number] = item[1]
     return enumerated_items_dict
@@ -86,7 +86,7 @@ def get_recipe_from_ai(ingredients):
     prompt = 'I have the following ingredients:\n\n'
     for i in range(0,len(ingredients)):
         prompt += f'{i+1}. ' + ingredients[i] + '\n'
-    prompt_posibility = prompt + '\n Is it possible to create a recipe? Please respond only with yes or no.'
+    prompt_posibility = prompt + '\n Is it possible to create a recipe? Please respond only with yes or no. If "no" then please give the  which must be formatted with "Reason:"'
     try:
         response = openai.Completion.create(
             model="text-davinci-002",
@@ -100,8 +100,15 @@ def get_recipe_from_ai(ingredients):
     #Check that the response contains "yes"
     pattern = re.compile(r"yes", re.IGNORECASE)
     if not pattern.search(response['choices'][0]['text']):
+        # Extract reason
+        try:
+            reason_match = re.search(r"Reason:\s*(.*)", response['choices'][0]['text'])
+            reason = reason_match.group(1)
+        except Exception:
+            raise ResponseParseException('Unable to process the AI output')
         response_obj = {
             'possible' : False,
+            'reason' : reason,
             'title' : '',
             'description' : '',
             'ingredients' : {},
@@ -111,7 +118,7 @@ def get_recipe_from_ai(ingredients):
         }
         return response_obj
     #Get the recipe
-    prompt_question = '''\nPlease suggest a recipe with these incredients. Format in the sections:\n
+    prompt_question = '''\nPlease suggest a recipe with these incredients. The output must be formatted with sections described below:\n
 "Title" a title for the recipe\n
 "Ingredients" which lists the ingredients (enumerated)\n
 "Instructions" which describes how to make the recipe\n
@@ -155,6 +162,7 @@ def get_recipe_from_ai(ingredients):
     extra_ingredient_dict = get_enumerated_items_as_object(extra)
     response_obj = {
         'possible' : True,
+        'reason' : '',
         'title' : title,
         'description' : description,
         'ingredients' : ingredient_dict,
