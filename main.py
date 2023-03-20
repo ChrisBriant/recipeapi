@@ -45,9 +45,6 @@ class Reading(BaseModel):
 class Key(BaseModel):
     key: str
 
-class Recipe(BaseModel):
-    possible: bool
-
 class RecipeResponse(BaseModel):
     possible: bool
     title: str
@@ -59,41 +56,6 @@ class RecipeResponse(BaseModel):
 
 class Ingredients(BaseModel):
     ingredient_list : List[str]
-
-
-def get_reading_from_ai(cards):
-    prompt = f'''The selected cards are {cards[0]['cardnumber']}:{cards[0]['name']},{cards[1]['cardnumber']}:{cards[1]['name']} and {cards[2]['cardnumber']}:{cards[2]['name']}. Give me a tarot reading based on these selected cards in 500 words or less'''
-    try:
-        response = openai.Completion.create(
-            model="text-davinci-002",
-            prompt=prompt,
-            temperature=0.6,
-            max_tokens=600,
-        )
-    except Exception as e:
-        print(e)
-        response = None
-    return response
-
-def get_cards_and_reading():
-    selected_cards = []
-    selected_card = random.sample(tarot_list,1)[0]
-    selected_cards.append(selected_card)
-    remaining_cards = [ card for card in tarot_list if card['cardnumber'] != selected_card['cardnumber']]
-    selected_card = random.sample(remaining_cards,1)[0]
-    remaining_cards = [ card for card in remaining_cards if card['cardnumber'] != selected_card['cardnumber']]
-    selected_cards.append(selected_card)
-    selected_card = random.sample(remaining_cards,1)[0]
-    selected_cards.append(selected_card)
-    reading = get_reading_from_ai(selected_cards)
-    if reading:
-        reading = reading.choices[0].text
-    else:
-        reading = 'Sorry I was unable to get a reading.'
-    return {
-        'cards' : selected_cards,
-        'message' : reading
-    }
 
 #For handling errors where the token limit is not enough
 class TokenLimitException(Exception):
@@ -135,12 +97,9 @@ def get_recipe_from_ai(ingredients):
     except Exception as e:
         print(e)
         response = None
-    print(prompt) 
-    print(response['choices'][0]['text'])
     #Check that the response contains "yes"
     pattern = re.compile(r"yes", re.IGNORECASE)
     if not pattern.search(response['choices'][0]['text']):
-        #response_obj['possible'] = False
         response_obj = {
             'possible' : False,
             'title' : '',
@@ -152,7 +111,6 @@ def get_recipe_from_ai(ingredients):
         }
         return response_obj
     #Get the recipe
-    #response_obj['possible'] = True
     prompt_question = '''\nPlease suggest a recipe with these incredients. Format in the sections:\n
 "Title" a title for the recipe\n
 "Ingredients" which lists the ingredients (enumerated)\n
@@ -167,53 +125,34 @@ def get_recipe_from_ai(ingredients):
             temperature=0.6,
             max_tokens=TOKEN_LIMIT,
         )
-        #print(response['usage']['completion_tokens'])
-        print('Total tokens',response['usage']['total_tokens'])
-        print('Token limit',TOKEN_LIMIT)
     except Exception as e:
         print(e)
         response = None
     if response['usage']['total_tokens'] > TOKEN_LIMIT:
         raise TokenLimitException('Not enough tokens to complete the request.')
-    print('Here is a the response',response)
     try:
         response_str = response['choices'][0]['text']
-        
         # Extract title
         title_match = re.search(r"Title:\s*(.*)", response_str)
         title = title_match.group(1)
-
         # Extract ingredients
         ingredients_match = re.search(r"Ingredients:\s*(.*)Instructions:", response_str, re.DOTALL)
         ingredients = ingredients_match.group(1)
-
         # Extract instructions
         instructions_match = re.search(r"Instructions:\s*(.*)Extra Ingredients:", response_str, re.DOTALL)
         instructions = instructions_match.group(1)
-
         # Extract description
         description_match = re.search(r"Description:\s*(.*)", response_str, re.DOTALL)
         description = description_match.group(1)
-
-
         # Extract extra ingredients
         extra_match = re.search(r"Extra Ingredients:\s*(.*)", response_str, re.DOTALL)
         extra = extra_match.group(1)
     except Exception:
         raise ResponseParseException('Unable to process the AI output')
 
-    # print("Title:", title)
-    # print("Ingredients:", ingredients)
-    # print("Instructions:", instructions)
-    # print("Extra Ingredients:", extra)
-
     ingredient_dict = get_enumerated_items_as_object(ingredients)
-    print(ingredient_dict)
     instruction_dict = get_enumerated_items_as_object(instructions)
-    print(instruction_dict)
     extra_ingredient_dict = get_enumerated_items_as_object(extra)
-    print(extra_ingredient_dict)
-    print(description)
     response_obj = {
         'possible' : True,
         'title' : title,
@@ -237,5 +176,4 @@ def get_recipe(key: Key, ingredients:Ingredients):
         raise HTTPException(status_code=400, detail="Token limit exceeded")
     except ResponseParseException:
         raise HTTPException(status_code=400, detail="Unable to prcess the reponse received")
-    #recipe = {'possible' : False}
     return recipe
